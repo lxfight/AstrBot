@@ -24,6 +24,14 @@ const pluginName = computed(() => String(route.params.pluginName || ""));
 const pageName = computed(() => String(route.params.pageName || ""));
 const getIframeWindow = () => iframeRef.value?.contentWindow || null;
 
+const goBack = () => {
+  if (window.history.length > 1) {
+    router.back();
+    return;
+  }
+  router.push("/extension#installed");
+};
+
 const cleanupSSEConnections = () => {
   for (const eventSource of sseConnections.values()) {
     eventSource.close();
@@ -401,7 +409,7 @@ watch([pluginName, pageName], loadPluginPage, { immediate: true });
         variant="tonal"
         color="primary"
         prepend-icon="mdi-arrow-left"
-        @click="router.push('/extension#installed')"
+        @click="goBack"
       >
         {{ tm("buttons.back") }}
       </v-btn>
@@ -409,9 +417,6 @@ watch([pluginName, pageName], loadPluginPage, { immediate: true });
       <div>
         <div class="text-h2 mb-1">
           {{ page?.title || pageName || tm("buttons.openPages") }}
-        </div>
-        <div class="text-body-2 text-medium-emphasis">
-          {{ plugin?.display_name || plugin?.name || pluginName }}
         </div>
       </div>
     </div>

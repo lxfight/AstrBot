@@ -600,7 +600,7 @@ async def test_dashboard_ssl_missing_cert_and_key_falls_back_to_http(
             "cert_file or key_file is missing" in message
             for message in warning_messages
         )
-        assert any("Starting Page at http://" in message for message in info_messages)
+        assert any("Starting WebUI at http://" in message for message in info_messages)
     finally:
         core_lifecycle_td.astrbot_config["dashboard"] = original_dashboard_config
 
