@@ -113,7 +113,6 @@ const {
   reloadPlugin,
   viewReadme,
   viewChangelog,
-  openPluginWebUI,
   openInstallDialog,
   handleInstallPlugin,
   confirmDangerInstall,
@@ -345,7 +344,6 @@ const togglePinnedExtension = (extension) => {
               @view-handlers="showPluginInfo(extension)"
               @view-readme="viewReadme(extension)"
               @view-changelog="viewChangelog(extension)"
-              @open-webui-page="() => openPluginWebUI(extension.name)"
             >
             </ExtensionCard>
           </v-col>

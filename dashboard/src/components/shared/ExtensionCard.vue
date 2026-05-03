@@ -34,7 +34,6 @@ const emit = defineEmits([
   "reload",
   "uninstall",
   "toggle-activation",
-  "open-webui-page",
   "view-handlers",
   "view-readme",
   "view-changelog",
@@ -63,19 +62,6 @@ const astrbotVersionRequirement = computed(() => {
     ? versionSpec.trim()
     : "";
 });
-
-const webuiEntry = computed(() => {
-  const entry = props.extension?.webui;
-  if (!entry || typeof entry !== "object") {
-    return null;
-  }
-  if (typeof entry.content_path !== "string" || !entry.content_path.length) {
-    return null;
-  }
-  return entry;
-});
-
-const hasWebUIEntry = computed(() => !!webuiEntry.value);
 
 const logoLoadFailed = ref(false);
 
@@ -138,10 +124,6 @@ const viewReadme = () => {
 
 const viewChangelog = () => {
   emit("view-changelog", props.extension);
-};
-
-const openWebUIPage = () => {
-  emit("open-webui-page", props.extension);
 };
 
 const togglePin = () => {
@@ -311,22 +293,6 @@ const togglePin = () => {
     <v-card-actions class="extension-actions">
       <template v-if="!marketMode">
         <v-spacer></v-spacer>
-        <template v-if="hasWebUIEntry">
-          <v-tooltip location="top" :text="tm('buttons.openWebUI')">
-            <template v-slot:activator="{ props: actionProps }">
-              <v-btn
-                v-bind="actionProps"
-                icon="mdi-monitor-dashboard"
-                size="small"
-                variant="tonal"
-                color="info"
-                :disabled="!extension.activated"
-                @click.stop="openWebUIPage"
-              ></v-btn>
-            </template>
-          </v-tooltip>
-        </template>
-
         <v-tooltip location="top">
           <template v-slot:activator="{ props: pinTooltipProps }">
             <v-btn

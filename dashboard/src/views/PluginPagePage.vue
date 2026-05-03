@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useModuleI18n } from "@/i18n/composables";
 
-const BRIDGE_CHANNEL = "astrbot-plugin-webui";
+const BRIDGE_CHANNEL = "astrbot-plugin-page";
 
 const route = useRoute();
 const router = useRouter();
@@ -13,7 +13,7 @@ const { tm } = useModuleI18n("features/extension");
 const loading = ref(true);
 const errorMessage = ref("");
 const plugin = ref(null);
-const webui = ref(null);
+const page = ref(null);
 const iframeSrc = ref("");
 const iframeRef = ref(null);
 const sseConnections = new Map();
@@ -21,6 +21,7 @@ const BRIDGE_TARGET_ORIGIN = window.location.origin;
 let iframeMessageOrigin = null;
 
 const pluginName = computed(() => String(route.params.pluginName || ""));
+const pageName = computed(() => String(route.params.pageName || ""));
 const getIframeWindow = () => iframeRef.value?.contentWindow || null;
 
 const cleanupSSEConnections = () => {
@@ -149,7 +150,7 @@ const closeSSEConnection = (subscriptionId) => {
 };
 
 const sendIframeContext = () => {
-  if (!plugin.value || !webui.value) {
+  if (!plugin.value || !page.value) {
     return;
   }
   postToIframe({
@@ -157,6 +158,8 @@ const sendIframeContext = () => {
     context: {
       pluginName: plugin.value.name,
       displayName: plugin.value.display_name || plugin.value.name,
+      pageName: page.value.name,
+      pageTitle: page.value.title,
     },
   });
 };
@@ -314,28 +317,28 @@ const handleIframeLoad = () => {
   sendIframeContext();
 };
 
-const loadPluginWebUI = async () => {
+const loadPluginPage = async () => {
   loading.value = true;
   errorMessage.value = "";
   plugin.value = null;
-  webui.value = null;
+  page.value = null;
   iframeSrc.value = "";
   iframeMessageOrigin = null;
   cleanupSSEConnections();
 
   try {
-    const response = await axios.get("/api/plugin/get", {
+    const detailResponse = await axios.get("/api/plugin/detail", {
       params: {
         name: pluginName.value,
       },
     });
-    if (response.data?.status === "error") {
-      throw new Error(response.data.message || tm("messages.pluginWebUILoadFailed"));
+    if (detailResponse.data?.status === "error") {
+      throw new Error(
+        detailResponse.data.message || tm("messages.pluginPageLoadFailed"),
+      );
     }
 
-    const pluginData = Array.isArray(response.data?.data)
-      ? response.data.data[0]
-      : null;
+    const pluginData = detailResponse.data?.data || null;
     if (!pluginData) {
       errorMessage.value = tm("messages.pluginNotFound");
       return;
@@ -346,21 +349,34 @@ const loadPluginWebUI = async () => {
       return;
     }
 
-    const webuiEntry =
-      pluginData.webui && typeof pluginData.webui === "object"
-        ? pluginData.webui
-        : null;
-    if (!webuiEntry || typeof webuiEntry.content_path !== "string" || !webuiEntry.content_path.length) {
-      errorMessage.value = tm("messages.pluginWebUIPageNotFound");
+    const entryResponse = await axios.get("/api/plugin/page/entry", {
+      params: {
+        name: pluginName.value,
+        page: pageName.value,
+      },
+    });
+    if (entryResponse.data?.status === "error") {
+      throw new Error(
+        entryResponse.data.message || tm("messages.pluginPageLoadFailed"),
+      );
+    }
+
+    const pageEntry = entryResponse.data?.data || null;
+    if (
+      !pageEntry ||
+      typeof pageEntry.content_path !== "string" ||
+      !pageEntry.content_path.length
+    ) {
+      errorMessage.value = tm("messages.pluginPageNotFound");
       return;
     }
 
     plugin.value = pluginData;
-    webui.value = webuiEntry;
-    iframeSrc.value = webuiEntry.content_path;
+    page.value = pageEntry;
+    iframeSrc.value = pageEntry.content_path;
   } catch (error) {
     errorMessage.value =
-      error?.response?.data?.message || error?.message || tm("messages.pluginWebUILoadFailed");
+      error?.response?.data?.message || error?.message || tm("messages.pluginPageLoadFailed");
   } finally {
     loading.value = false;
   }
@@ -375,11 +391,11 @@ onBeforeUnmount(() => {
   cleanupSSEConnections();
 });
 
-watch([pluginName], loadPluginWebUI, { immediate: true });
+watch([pluginName, pageName], loadPluginPage, { immediate: true });
 </script>
 
 <template>
-  <div class="plugin-webui-page">
+  <div class="plugin-page-page">
     <div class="d-flex align-center flex-wrap mb-4" style="gap: 12px">
       <v-btn
         variant="tonal"
@@ -392,7 +408,7 @@ watch([pluginName], loadPluginWebUI, { immediate: true });
 
       <div>
         <div class="text-h2 mb-1">
-          {{ webui?.title || tm("buttons.openWebUI") }}
+          {{ page?.title || pageName || tm("buttons.openPages") }}
         </div>
         <div class="text-body-2 text-medium-emphasis">
           {{ plugin?.display_name || plugin?.name || pluginName }}
@@ -400,9 +416,9 @@ watch([pluginName], loadPluginWebUI, { immediate: true });
       </div>
     </div>
 
-    <v-card class="plugin-webui-card" elevation="0">
+    <v-card class="plugin-page-card" elevation="0">
       <v-card-text class="pa-0">
-        <div v-if="loading" class="plugin-webui-state">
+        <div v-if="loading" class="plugin-page-state">
           <v-progress-circular indeterminate color="primary" />
           <span>{{ tm("status.loading") }}</span>
         </div>
@@ -417,7 +433,7 @@ watch([pluginName], loadPluginWebUI, { immediate: true });
           v-else
           ref="iframeRef"
           :src="iframeSrc"
-          class="plugin-webui-frame"
+          class="plugin-page-frame"
           referrerpolicy="no-referrer"
           sandbox="allow-scripts allow-forms allow-downloads"
           @load="handleIframeLoad"
@@ -428,20 +444,20 @@ watch([pluginName], loadPluginWebUI, { immediate: true });
 </template>
 
 <style scoped>
-.plugin-webui-card {
+.plugin-page-card {
   background-color: rgb(var(--v-theme-surface));
   border-radius: 16px;
   overflow: hidden;
 }
 
-.plugin-webui-frame {
+.plugin-page-frame {
   width: 100%;
   min-height: calc(100vh - 220px);
   border: 0;
   background: transparent;
 }
 
-.plugin-webui-state {
+.plugin-page-state {
   min-height: calc(100vh - 220px);
   display: flex;
   align-items: center;

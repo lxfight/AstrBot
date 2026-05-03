@@ -23,7 +23,7 @@ from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 from astrbot.core.utils.datetime_utils import to_utc_isoformat
 from astrbot.core.utils.io import get_local_ip_addresses
 
-from .plugin_webui_auth import PluginWebUIAuth
+from .plugin_page_auth import PluginPageAuth
 from .routes import *
 from .routes.api_key import ALL_OPEN_API_SCOPES
 from .routes.auth import DASHBOARD_JWT_COOKIE_NAME
@@ -208,19 +208,19 @@ class AstrBotDashboard:
         ]
         if any(request.path.startswith(prefix) for prefix in allowed_endpoints):
             return None
-        is_plugin_webui_path = PluginWebUIAuth.is_protected_path(request.path)
+        is_plugin_page_path = PluginPageAuth.is_protected_path(request.path)
         token = self._extract_dashboard_jwt()
-        if not token and is_plugin_webui_path:
-            token = PluginWebUIAuth.extract_asset_token()
+        if not token and is_plugin_page_path:
+            token = PluginPageAuth.extract_asset_token()
         if not token:
             r = jsonify(Response().error("未授权").__dict__)
             r.status_code = 401
             return r
         try:
             payload = jwt.decode(token, self._jwt_secret, algorithms=["HS256"])
-            if PluginWebUIAuth.is_asset_token(
+            if PluginPageAuth.is_asset_token(
                 payload
-            ) and not PluginWebUIAuth.is_scope_valid(
+            ) and not PluginPageAuth.is_scope_valid(
                 payload,
                 request.path,
             ):

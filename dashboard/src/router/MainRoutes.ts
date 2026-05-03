@@ -27,9 +27,9 @@ const MainRoutes = {
       component: () => import('@/views/ExtensionPage.vue')
     },
     {
-      name: 'PluginWebUI',
-      path: '/plugin-webui/:pluginName',
-      component: () => import('@/views/PluginWebUIPage.vue')
+      name: 'PluginPage',
+      path: '/plugin-page/:pluginName/:pageName',
+      component: () => import('@/views/PluginPagePage.vue')
     },
     {
       name: EXTENSION_DETAILS_ROUTE_NAME,

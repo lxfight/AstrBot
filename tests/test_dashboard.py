@@ -20,7 +20,7 @@ from werkzeug.datastructures import FileStorage
 from astrbot.core import LogBroker
 from astrbot.core.core_lifecycle import AstrBotCoreLifecycle
 from astrbot.core.db.sqlite import SQLiteDatabase
-from astrbot.core.star.star import PluginWebUIPage, StarMetadata, star_registry
+from astrbot.core.star.star import StarMetadata, star_registry
 from astrbot.core.star.star_handler import star_handlers_registry
 from astrbot.core.utils.pip_installer import PipInstallError
 from astrbot.dashboard.routes.auth import DASHBOARD_JWT_COOKIE_NAME
@@ -32,10 +32,8 @@ from tests.fixtures.helpers import (
     create_mock_updater_update,
 )
 
-PLUGIN_WEBUI_DEMO_NAME = "astrbot_plugin_webui_demo"
-PLUGIN_WEBUI_DEMO_WEBUI = {
-    "title": "Demo WebUI",
-}
+PLUGIN_PAGE_DEMO_NAME = "astrbot_plugin_page_demo"
+PLUGIN_PAGE_DEMO_PAGE_NAME = "bridge-demo"
 
 
 def _strip_query(url: str) -> str:
@@ -44,28 +42,28 @@ def _strip_query(url: str) -> str:
 
 
 @pytest.fixture
-def registered_plugin_webui(core_lifecycle_td: AstrBotCoreLifecycle, monkeypatch):
+def registered_plugin_page(core_lifecycle_td: AstrBotCoreLifecycle, monkeypatch):
     plugin_root = (
         Path(core_lifecycle_td.plugin_manager.plugin_store_path)
-        / PLUGIN_WEBUI_DEMO_NAME
+        / PLUGIN_PAGE_DEMO_NAME
     )
-    webui_root = plugin_root / "webui"
-    shared_root = webui_root / "shared"
-    images_root = webui_root / "images"
+    page_root = plugin_root / "pages" / PLUGIN_PAGE_DEMO_PAGE_NAME
+    shared_root = page_root / "shared"
+    images_root = page_root / "images"
     shared_root.mkdir(parents=True, exist_ok=True)
     images_root.mkdir(parents=True, exist_ok=True)
 
-    (webui_root / "index.html").write_text(
+    (page_root / "index.html").write_text(
         """
 <!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Plugin WebUI Demo</title>
+    <title>Plugin Page Demo</title>
     <link rel="stylesheet" href="shared/base.css" />
   </head>
   <body>
-    <h1>Single-entry plugin WebUI with internal navigation</h1>
+    <h1>Single plugin Page with internal navigation</h1>
     <div id="app"></div>
     <script type="module" src="app.js"></script>
   </body>
@@ -73,7 +71,7 @@ def registered_plugin_webui(core_lifecycle_td: AstrBotCoreLifecycle, monkeypatch
 """.strip(),
         encoding="utf-8",
     )
-    (webui_root / "app.js").write_text(
+    (page_root / "app.js").write_text(
         """
 import React from "react";
 import "./shared/common.js";
@@ -99,18 +97,13 @@ window.renderTabs = renderTabs;
     )
 
     plugin = StarMetadata(
-        name=PLUGIN_WEBUI_DEMO_NAME,
+        name=PLUGIN_PAGE_DEMO_NAME,
         author="AstrBot Test",
-        desc="Plugin WebUI demo",
+        desc="Plugin Page demo",
         version="1.0.0",
-        display_name="Plugin WebUI Demo",
-        root_dir_name=PLUGIN_WEBUI_DEMO_NAME,
+        display_name="Plugin Page Demo",
+        root_dir_name=PLUGIN_PAGE_DEMO_NAME,
         activated=True,
-        webui=PluginWebUIPage(
-            title=PLUGIN_WEBUI_DEMO_WEBUI["title"],
-            root_dir="webui",
-            entry_file="index.html",
-        ),
     )
 
     monkeypatch.setattr(
@@ -237,24 +230,24 @@ async def test_auth_login_secure_cookie_override(
     assert "SameSite=Strict" in jwt_cookie_header
 
 
-def test_plugin_webui_content_path_escapes_plugin_name():
+def test_plugin_page_content_path_escapes_plugin_name():
     assert (
-        PluginRoute._build_plugin_webui_content_path("plugin with space")
-        == "/api/plugin/webui/content/plugin%20with%20space/"
+        PluginRoute._build_plugin_page_content_path("plugin with space", "main page")
+        == "/api/plugin/page/content/plugin%20with%20space/main%20page/"
     )
     assert (
-        PluginRoute._build_plugin_webui_content_path(
-            "plugin with space", "assets/main file.js"
+        PluginRoute._build_plugin_page_content_path(
+            "plugin with space", "main page", "assets/main file.js"
         )
-        == "/api/plugin/webui/content/plugin%20with%20space/assets/main%20file.js"
+        == "/api/plugin/page/content/plugin%20with%20space/main%20page/assets/main%20file.js"
     )
 
 
 @pytest.mark.asyncio
-async def test_plugin_get_includes_registered_webui(
+async def test_plugin_get_excludes_scanned_pages(
     app: Quart,
     authenticated_header: dict,
-    registered_plugin_webui: StarMetadata,
+    registered_plugin_page: StarMetadata,
 ):
     test_client = app.test_client()
     response = await test_client.get("/api/plugin/get", headers=authenticated_header)
@@ -263,23 +256,78 @@ async def test_plugin_get_includes_registered_webui(
     assert data["status"] == "ok"
 
     plugin = next(
-        item for item in data["data"] if item["name"] == PLUGIN_WEBUI_DEMO_NAME
+        item for item in data["data"] if item["name"] == PLUGIN_PAGE_DEMO_NAME
     )
     assert plugin["activated"] is True
-    assert plugin["webui"] == {
-        **PLUGIN_WEBUI_DEMO_WEBUI,
-        "content_path": f"/api/plugin/webui/content/{PLUGIN_WEBUI_DEMO_NAME}/",
-    }
+    assert "page" not in plugin
+    assert "pages" not in plugin
 
 
 @pytest.mark.asyncio
-async def test_plugin_webui_content_requires_auth(
+async def test_plugin_detail_includes_scanned_page_component(
     app: Quart,
-    registered_plugin_webui: StarMetadata,
+    authenticated_header: dict,
+    registered_plugin_page: StarMetadata,
 ):
     test_client = app.test_client()
     response = await test_client.get(
-        f"/api/plugin/webui/content/{PLUGIN_WEBUI_DEMO_NAME}/"
+        f"/api/plugin/detail?name={PLUGIN_PAGE_DEMO_NAME}",
+        headers=authenticated_header,
+    )
+    assert response.status_code == 200
+    data = await response.get_json()
+    assert data["status"] == "ok"
+
+    page_components = [
+        component
+        for component in data["data"]["components"]
+        if component["type"] == "page"
+    ]
+    assert page_components == [
+        {
+            "type": "page",
+            "name": PLUGIN_PAGE_DEMO_PAGE_NAME,
+            "title": PLUGIN_PAGE_DEMO_PAGE_NAME,
+            "page_name": PLUGIN_PAGE_DEMO_PAGE_NAME,
+            "description": "Plugin Page entry",
+            "plugin_name": PLUGIN_PAGE_DEMO_NAME,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_plugin_page_entry_returns_signed_content_path(
+    app: Quart,
+    authenticated_header: dict,
+    registered_plugin_page: StarMetadata,
+):
+    test_client = app.test_client()
+    response = await test_client.get(
+        (
+            f"/api/plugin/page/entry?name={PLUGIN_PAGE_DEMO_NAME}"
+            f"&page={PLUGIN_PAGE_DEMO_PAGE_NAME}"
+        ),
+        headers=authenticated_header,
+    )
+    assert response.status_code == 200
+    data = await response.get_json()
+    assert data["status"] == "ok"
+    assert data["data"]["name"] == PLUGIN_PAGE_DEMO_PAGE_NAME
+    assert data["data"]["title"] == PLUGIN_PAGE_DEMO_PAGE_NAME
+    assert data["data"]["content_path"].startswith(
+        f"/api/plugin/page/content/{PLUGIN_PAGE_DEMO_NAME}/{PLUGIN_PAGE_DEMO_PAGE_NAME}/"
+    )
+    assert "asset_token=" in data["data"]["content_path"]
+
+
+@pytest.mark.asyncio
+async def test_plugin_page_content_requires_auth(
+    app: Quart,
+    registered_plugin_page: StarMetadata,
+):
+    test_client = app.test_client()
+    response = await test_client.get(
+        f"/api/plugin/page/content/{PLUGIN_PAGE_DEMO_NAME}/{PLUGIN_PAGE_DEMO_PAGE_NAME}/"
     )
     assert response.status_code == 401
     data = await response.get_json()
@@ -287,10 +335,10 @@ async def test_plugin_webui_content_requires_auth(
 
 
 @pytest.mark.asyncio
-async def test_plugin_webui_content_supports_cookie_auth(
+async def test_plugin_page_content_supports_cookie_auth(
     app: Quart,
     core_lifecycle_td: AstrBotCoreLifecycle,
-    registered_plugin_webui: StarMetadata,
+    registered_plugin_page: StarMetadata,
 ):
     test_client = app.test_client()
     login_response = await test_client.post(
@@ -303,11 +351,11 @@ async def test_plugin_webui_content_supports_cookie_auth(
     assert login_response.status_code == 200
 
     response = await test_client.get(
-        f"/api/plugin/webui/content/{PLUGIN_WEBUI_DEMO_NAME}/"
+        f"/api/plugin/page/content/{PLUGIN_PAGE_DEMO_NAME}/{PLUGIN_PAGE_DEMO_PAGE_NAME}/"
     )
     assert response.status_code == 200
     content = (await response.get_data()).decode("utf-8")
-    assert "Single-entry plugin WebUI with internal navigation" in content
+    assert "Single plugin Page with internal navigation" in content
     assert response.headers["X-Frame-Options"] == "SAMEORIGIN"
     assert response.headers["Cache-Control"] == "no-store"
     assert "frame-ancestors 'self'" in response.headers["Content-Security-Policy"]
@@ -324,7 +372,7 @@ async def test_plugin_webui_content_supports_cookie_auth(
     assert "renderTabs" in asset_content
     assert 'from "react"' in asset_content
     assert (
-        f"/api/plugin/webui/content/{PLUGIN_WEBUI_DEMO_NAME}/shared/common.js"
+        f"/api/plugin/page/content/{PLUGIN_PAGE_DEMO_NAME}/{PLUGIN_PAGE_DEMO_PAGE_NAME}/shared/common.js"
         in asset_content
     )
     assert "asset_token=" in asset_content
@@ -337,18 +385,18 @@ async def test_plugin_webui_content_supports_cookie_auth(
     bridge_response = await test_client.get(bridge_url_match.group(1))
     assert bridge_response.status_code == 200
     bridge_content = (await bridge_response.get_data()).decode("utf-8")
-    assert "AstrBotPluginWebUI" in bridge_content
+    assert "AstrBotPluginPage" in bridge_content
 
 
 @pytest.mark.asyncio
-async def test_plugin_webui_content_issues_scoped_asset_token(
+async def test_plugin_page_content_issues_scoped_asset_token(
     app: Quart,
     authenticated_header: dict,
-    registered_plugin_webui: StarMetadata,
+    registered_plugin_page: StarMetadata,
 ):
     authorized_client = app.test_client()
     response = await authorized_client.get(
-        f"/api/plugin/webui/content/{PLUGIN_WEBUI_DEMO_NAME}/",
+        f"/api/plugin/page/content/{PLUGIN_PAGE_DEMO_NAME}/{PLUGIN_PAGE_DEMO_PAGE_NAME}/",
         headers=authenticated_header,
     )
     assert response.status_code == 200
@@ -391,20 +439,25 @@ async def test_plugin_webui_content_issues_scoped_asset_token(
     assert out_of_scope_response.status_code == 401
 
     cross_plugin_response = await anonymous_client.get(
-        f"/api/plugin/webui/content/another_plugin/app.js?asset_token={asset_token}"
+        f"/api/plugin/page/content/another_plugin/{PLUGIN_PAGE_DEMO_PAGE_NAME}/app.js?asset_token={asset_token}"
     )
     assert cross_plugin_response.status_code == 401
 
+    cross_page_response = await anonymous_client.get(
+        f"/api/plugin/page/content/{PLUGIN_PAGE_DEMO_NAME}/another-page/app.js?asset_token={asset_token}"
+    )
+    assert cross_page_response.status_code == 401
+
 
 @pytest.mark.asyncio
-async def test_plugin_webui_assets_require_dashboard_auth(
+async def test_plugin_page_assets_require_dashboard_auth(
     app: Quart,
     authenticated_header: dict,
-    registered_plugin_webui: StarMetadata,
+    registered_plugin_page: StarMetadata,
 ):
     authorized_client = app.test_client()
     response = await authorized_client.get(
-        f"/api/plugin/webui/content/{PLUGIN_WEBUI_DEMO_NAME}/",
+        f"/api/plugin/page/content/{PLUGIN_PAGE_DEMO_NAME}/{PLUGIN_PAGE_DEMO_PAGE_NAME}/",
         headers=authenticated_header,
     )
     assert response.status_code == 200
@@ -429,24 +482,24 @@ async def test_plugin_webui_assets_require_dashboard_auth(
 
 
 @pytest.mark.asyncio
-async def test_plugin_webui_content_blocks_path_traversal(
+async def test_plugin_page_content_blocks_path_traversal(
     app: Quart,
     authenticated_header: dict,
-    registered_plugin_webui: StarMetadata,
+    registered_plugin_page: StarMetadata,
 ):
     test_client = app.test_client()
     response = await test_client.get(
-        f"/api/plugin/webui/content/{PLUGIN_WEBUI_DEMO_NAME}/..%2Fmain.py",
+        f"/api/plugin/page/content/{PLUGIN_PAGE_DEMO_NAME}/{PLUGIN_PAGE_DEMO_PAGE_NAME}/..%2Fmain.py",
         headers=authenticated_header,
     )
     assert response.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_logout_clears_cookie_for_plugin_webui(
+async def test_logout_clears_cookie_for_plugin_page(
     app: Quart,
     core_lifecycle_td: AstrBotCoreLifecycle,
-    registered_plugin_webui: StarMetadata,
+    registered_plugin_page: StarMetadata,
 ):
     test_client = app.test_client()
     response = await test_client.post(
@@ -459,7 +512,7 @@ async def test_logout_clears_cookie_for_plugin_webui(
     assert response.status_code == 200
 
     response = await test_client.get(
-        f"/api/plugin/webui/content/{PLUGIN_WEBUI_DEMO_NAME}/"
+        f"/api/plugin/page/content/{PLUGIN_PAGE_DEMO_NAME}/{PLUGIN_PAGE_DEMO_PAGE_NAME}/"
     )
     assert response.status_code == 200
     html_text = (await response.get_data()).decode("utf-8")
@@ -482,7 +535,7 @@ async def test_logout_clears_cookie_for_plugin_webui(
     assert "SameSite=Strict" in clear_cookie_header
 
     response = await test_client.get(
-        f"/api/plugin/webui/content/{PLUGIN_WEBUI_DEMO_NAME}/"
+        f"/api/plugin/page/content/{PLUGIN_PAGE_DEMO_NAME}/{PLUGIN_PAGE_DEMO_PAGE_NAME}/"
     )
     assert response.status_code == 401
     asset_response = await test_client.get(_strip_query(asset_url_match.group(1)))
@@ -547,7 +600,7 @@ async def test_dashboard_ssl_missing_cert_and_key_falls_back_to_http(
             "cert_file or key_file is missing" in message
             for message in warning_messages
         )
-        assert any("Starting WebUI at http://" in message for message in info_messages)
+        assert any("Starting Page at http://" in message for message in info_messages)
     finally:
         core_lifecycle_td.astrbot_config["dashboard"] = original_dashboard_config
 

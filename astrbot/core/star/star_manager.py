@@ -49,7 +49,7 @@ from .command_management import sync_command_configs
 from .context import Context
 from .error_messages import format_plugin_error
 from .filter.permission import PermissionType, PermissionTypeFilter
-from .star import PluginWebUIPage, star_map, star_registry
+from .star import star_map, star_registry
 from .star_handler import EventType, star_handlers_registry
 from .updator import PluginUpdator
 
@@ -460,30 +460,6 @@ class PluginManager:
             return __import__(path, fromlist=[module_str])
 
     @staticmethod
-    def _normalize_plugin_webui(raw_webui: object) -> PluginWebUIPage | None:
-        if not isinstance(raw_webui, dict):
-            return None
-
-        def _get_str_value(keys: list[str], default: str) -> str:
-            for key in keys:
-                value = raw_webui.get(key)
-                if isinstance(value, str):
-                    stripped = value.strip()
-                    if stripped:
-                        return stripped
-            return default
-
-        title = _get_str_value(["title"], "WebUI")
-        root_dir = _get_str_value(["root_dir", "root"], "webui")
-        entry_file = _get_str_value(["entry_file", "entry"], "index.html")
-
-        return PluginWebUIPage(
-            title=title,
-            root_dir=root_dir,
-            entry_file=entry_file,
-        )
-
-    @staticmethod
     def _load_plugin_metadata(plugin_path: str, plugin_obj=None) -> StarMetadata | None:
         """先寻找 metadata.yaml 文件，如果不存在，则使用插件对象的 info() 函数获取元数据。
 
@@ -543,7 +519,6 @@ class PluginManager:
                     if isinstance(metadata.get("astrbot_version"), str)
                     else None
                 ),
-                webui=PluginManager._normalize_plugin_webui(metadata.get("webui")),
                 i18n=PluginManager._load_plugin_i18n(plugin_path),
             )
 
@@ -1014,7 +989,7 @@ class PluginManager:
                             metadata.display_name = metadata_yaml.display_name
                             metadata.support_platforms = metadata_yaml.support_platforms
                             metadata.astrbot_version = metadata_yaml.astrbot_version
-                            metadata.webui = metadata_yaml.webui
+                            metadata.pages = metadata_yaml.pages
                             metadata.i18n = metadata_yaml.i18n
                     except Exception as e:
                         logger.warning(
@@ -1402,7 +1377,7 @@ class PluginManager:
                 如果找不到插件元数据则返回 None。
 
         """
-        # this metric is for displaying plugins installation count in webui
+        # this metric is for displaying plugins installation count in pages
         asyncio.create_task(
             Metric.upload(
                 et="install_star",

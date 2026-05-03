@@ -901,18 +901,6 @@ export const useExtensionPage = () => {
     changelogDialog.show = true;
   };
 
-  const openPluginWebUI = (pluginName) => {
-    if (typeof pluginName !== "string" || !pluginName.length) {
-      return;
-    }
-    router.push({
-      name: "PluginWebUI",
-      params: {
-        pluginName,
-      },
-    });
-  };
-
   const resetInstallDialogState = () => {
     selectedMarketInstallPlugin.value = null;
     extension_url.value = "";
@@ -1767,7 +1755,6 @@ export const useExtensionPage = () => {
     reloadPlugin,
     viewReadme,
     viewChangelog,
-    openPluginWebUI,
     openInstallDialog,
     closeInstallDialog,
     handleInstallPlugin,

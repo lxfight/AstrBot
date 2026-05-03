@@ -1,5 +1,5 @@
-(function attachAstrBotPluginWebUIBridge() {
-  const CHANNEL = "astrbot-plugin-webui";
+(function attachAstrBotPluginPageBridge() {
+  const CHANNEL = "astrbot-plugin-page";
   const SELF_ORIGIN = window.location.origin;
   const pendingRequests = new Map();
   const sseHandlers = new Map();
@@ -132,7 +132,7 @@
     }
   });
 
-  window.AstrBotPluginWebUI = {
+  window.AstrBotPluginPage = {
     ready() {
       return readyPromise;
     },
