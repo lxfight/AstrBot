@@ -241,7 +241,9 @@ const handleBridgeRequest = async (message) => {
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
-      URL.revokeObjectURL(blobUrl);
+      setTimeout(() => {
+        URL.revokeObjectURL(blobUrl);
+      }, 0);
       sendBridgeResponse(requestId, true, { filename: anchor.download });
       return;
     }
