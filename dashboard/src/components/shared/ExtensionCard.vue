@@ -312,7 +312,6 @@ const togglePin = () => {
       <template v-if="!marketMode">
         <v-spacer></v-spacer>
         <template v-if="hasWebUIEntry">
-        <template v-if="hasWebUIEntry">
           <v-tooltip location="top" :text="tm('buttons.openWebUI')">
             <template v-slot:activator="{ props: actionProps }">
               <v-btn
