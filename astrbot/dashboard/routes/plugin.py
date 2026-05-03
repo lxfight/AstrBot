@@ -23,7 +23,9 @@ from quart import g, make_response, request
 
 from astrbot.api import sp
 from astrbot.core import DEMO_MODE, file_token_service, logger
+from astrbot.core.computer.computer_client import sync_skills_to_active_sandboxes
 from astrbot.core.core_lifecycle import AstrBotCoreLifecycle
+from astrbot.core.skills.skill_manager import SkillManager
 from astrbot.core.star.filter.command import CommandFilter
 from astrbot.core.star.filter.command_group import CommandGroupFilter
 from astrbot.core.star.filter.permission import PermissionTypeFilter
@@ -75,6 +77,15 @@ def _normalize_plugin_webui_asset_path(asset_path: str) -> str:
     return PluginRoute._normalize_plugin_webui_path(asset_path, allow_empty=True)
 
 
+PLUGIN_COMPONENT_TYPE_ORDER = {
+    "skill": 0,
+    "command": 1,
+    "llm_tool": 2,
+    "listener": 3,
+    "hook": 4,
+}
+
+
 @dataclass
 class RegistrySource:
     urls: list[str]
@@ -92,6 +103,7 @@ class PluginRoute(Route):
         super().__init__(context)
         self.routes = {
             "/plugin/get": ("GET", self.get_plugins),
+            "/plugin/detail": ("GET", self.get_plugin_detail),
             "/plugin/check-compat": ("POST", self.check_plugin_compatibility),
             "/plugin/install": ("POST", self.install_plugin),
             "/plugin/install-upload": ("POST", self.install_plugin_upload),
@@ -136,6 +148,8 @@ class PluginRoute(Route):
             EventType.AdapterMessageEvent: "平台消息下发时",
             EventType.OnLLMRequestEvent: "LLM 请求时",
             EventType.OnLLMResponseEvent: "LLM 响应后",
+            EventType.OnAgentBeginEvent: "Agent 开始运行时",
+            EventType.OnAgentDoneEvent: "Agent 运行完成后",
             EventType.OnDecoratingResultEvent: "回复消息前",
             EventType.OnCallingFuncToolEvent: "函数工具",
             EventType.OnAfterMessageSentEvent: "发送消息后",
@@ -688,6 +702,12 @@ class PluginRoute(Route):
             )
         return await self._serve_plugin_webui_static_asset(file_path)
 
+    async def _sync_skills_after_plugin_change(self) -> None:
+        try:
+            await sync_skills_to_active_sandboxes()
+        except Exception:
+            logger.warning("Failed to sync plugin-provided skills to active sandboxes.")
+
     async def check_plugin_compatibility(self):
         try:
             data = await request.get_json()
@@ -728,6 +748,7 @@ class PluginRoute(Route):
             success, err = await self.plugin_manager.reload_failed_plugin(dir_name)
 
             if success:
+                await self._sync_skills_after_plugin_change()
                 return Response().ok(None, f"插件 {dir_name} 重载成功。").__dict__
             else:
                 return Response().error(f"重载失败: {err}").__dict__
@@ -750,6 +771,7 @@ class PluginRoute(Route):
             success, message = await self.plugin_manager.reload(plugin_name)
             if not success:
                 return Response().error(message or "插件重载失败").__dict__
+            await self._sync_skills_after_plugin_change()
             return Response().ok(None, "重载成功。").__dict__
         except Exception as e:
             logger.error(f"/api/plugin/reload: {traceback.format_exc()}")
@@ -859,7 +881,7 @@ class PluginRoute(Route):
                 cache_data = json.load(f)
             return cache_data.get("md5")
         except Exception as e:
-            logger.warning(f"加载缓存MD5失败: {e}")
+            logger.warning(f"Failed to load cached MD5: {e}")
             return None
 
     async def _fetch_remote_md5(self, md5_url: str | None) -> str | None:
@@ -882,7 +904,7 @@ class PluginRoute(Route):
                     data = await response.json()
                     return data.get("md5", "")
         except Exception as e:
-            logger.debug(f"获取远程MD5失败: {e}")
+            logger.debug(f"Failed to fetch remote MD5: {e}")
         return None
 
     async def _is_cache_valid(self, source: RegistrySource) -> bool:
@@ -890,17 +912,19 @@ class PluginRoute(Route):
         try:
             cached_md5 = self._load_cached_md5(source.cache_file)
             if not cached_md5:
-                logger.debug("缓存文件中没有MD5信息")
+                logger.debug("MD5 not found in cache, treating cache as invalid")
                 return False
 
             remote_md5 = await self._fetch_remote_md5(source.md5_url)
             if remote_md5 is None:
-                logger.warning("无法获取远程MD5，将使用缓存")
+                logger.warning(
+                    "Cannot fetch remote MD5, using cache without validation"
+                )
                 return True  # 如果无法获取远程MD5，认为缓存有效
 
             is_valid = cached_md5 == remote_md5
             logger.debug(
-                f"插件数据MD5: 本地={cached_md5}, 远程={remote_md5}, 有效={is_valid}",
+                f"Plugin cache: local={cached_md5}, remote={remote_md5}, effective={is_valid}",
             )
             return is_valid
 
@@ -917,11 +941,11 @@ class PluginRoute(Route):
                     # 检查缓存是否有效
                     if "data" in cache_data and "timestamp" in cache_data:
                         logger.debug(
-                            f"加载缓存文件: {cache_file}, 缓存时间: {cache_data['timestamp']}",
+                            f"Loading cached file: {cache_file}, Cache time: {cache_data['timestamp']}",
                         )
                         return cache_data["data"]
         except Exception as e:
-            logger.warning(f"加载插件市场缓存失败: {e}")
+            logger.warning(f"Failed to load plugin market cache: {e}")
         return None
 
     def _save_plugin_cache(self, cache_file: str, data, md5: str | None = None) -> None:
@@ -938,9 +962,9 @@ class PluginRoute(Route):
 
             with open(cache_file, "w", encoding="utf-8") as f:
                 json.dump(cache_data, f, ensure_ascii=False, indent=2)
-            logger.debug(f"插件市场数据已缓存到: {cache_file}, MD5: {md5}")
+            logger.debug(f"Cached plugin market data: {cache_file}, MD5: {md5}")
         except Exception as e:
-            logger.warning(f"保存插件市场缓存失败: {e}")
+            logger.warning(f"Failed to save plugin market cache: {e}")
 
     async def get_plugin_logo_token(self, logo_path: str):
         try:
@@ -1000,15 +1024,13 @@ class PluginRoute(Route):
                 "reserved": plugin.reserved,
                 "activated": plugin.activated,
                 "online_vesion": "",
-                "handlers": await self.get_plugin_handlers_info(
-                    plugin.star_handler_full_names,
-                ),
                 "display_name": plugin.display_name,
                 "logo": f"/api/file/{logo_url}" if logo_url else None,
                 "support_platforms": plugin.support_platforms,
                 "astrbot_version": plugin.astrbot_version,
                 "installed_at": self._get_plugin_installed_at(plugin),
                 "webui": await self._serialize_plugin_webui(plugin),
+                "i18n": plugin.i18n,
             }
             # 检查是否为全空的幽灵插件
             if not any(
@@ -1028,13 +1050,66 @@ class PluginRoute(Route):
             .__dict__
         )
 
+    async def get_plugin_detail(self):
+        plugin_name = request.args.get("name")
+        if not plugin_name:
+            return Response().error("缺少插件名").__dict__
+
+        for plugin in self.plugin_manager.context.get_all_stars():
+            if plugin.name != plugin_name:
+                continue
+
+            logo_url = None
+            if plugin.logo_path:
+                logo_url = await self.get_plugin_logo_token(plugin.logo_path)
+
+            return (
+                Response()
+                .ok(
+                    {
+                        "name": plugin.name,
+                        "repo": "" if plugin.repo is None else plugin.repo,
+                        "author": plugin.author,
+                        "desc": plugin.desc,
+                        "version": plugin.version,
+                        "reserved": plugin.reserved,
+                        "activated": plugin.activated,
+                        "online_vesion": "",
+                        "components": await self.get_plugin_components_info(plugin),
+                        "display_name": plugin.display_name,
+                        "logo": f"/api/file/{logo_url}" if logo_url else None,
+                        "support_platforms": plugin.support_platforms,
+                        "astrbot_version": plugin.astrbot_version,
+                        "installed_at": self._get_plugin_installed_at(plugin),
+                        "i18n": plugin.i18n,
+                    }
+                )
+                .__dict__
+            )
+
+        return Response().error("插件不存在").__dict__
+
     async def get_failed_plugins(self):
         """专门获取加载失败的插件列表(字典格式)"""
         return Response().ok(self.plugin_manager.failed_plugin_dict).__dict__
 
-    async def get_plugin_handlers_info(self, handler_full_names: list[str]):
-        """解析插件行为"""
-        handlers = []
+    async def get_plugin_components_info(self, plugin):
+        """Build plugin components for the dashboard."""
+        handler_components = await self.get_plugin_handler_components(
+            plugin.star_handler_full_names,
+        )
+        components = [
+            *self.get_plugin_skill_components(plugin),
+            *handler_components,
+        ]
+        return sorted(
+            components,
+            key=lambda item: PLUGIN_COMPONENT_TYPE_ORDER.get(item["type"], 99),
+        )
+
+    async def get_plugin_handler_components(self, handler_full_names: list[str]):
+        """Build behavior components from registered handlers."""
+        components = []
 
         for handler_full_name in handler_full_names:
             info = {}
@@ -1050,48 +1125,254 @@ class PluginRoute(Route):
                 handler.event_type.name,
             )
             info["handler_full_name"] = handler.handler_full_name
-            info["desc"] = handler.desc
+            info["description"] = handler.desc or "无描述"
             info["handler_name"] = handler.handler_name
 
+            component_type = "hook"
+            component = None
             if handler.event_type == EventType.AdapterMessageEvent:
                 # 处理平台适配器消息事件
                 has_admin = False
-                for filter in (
+                for event_filter in (
                     handler.event_filters
                 ):  # 正常handler就只有 1~2 个 filter，因此这里时间复杂度不会太高
-                    if isinstance(filter, CommandFilter):
-                        info["type"] = "指令"
-                        info["cmd"] = (
-                            f"{filter.parent_command_names[0]} {filter.command_name}"
+                    if isinstance(event_filter, CommandFilter):
+                        component_type = "command"
+                        info["display_type"] = "指令"
+                        info["cmd"] = self._get_command_filter_display_name(
+                            event_filter
                         )
-                        info["cmd"] = info["cmd"].strip()
-                    elif isinstance(filter, CommandGroupFilter):
-                        info["type"] = "指令组"
-                        info["cmd"] = filter.get_complete_command_names()[0]
-                        info["cmd"] = info["cmd"].strip()
-                        info["sub_command"] = filter.print_cmd_tree(
-                            filter.sub_command_filters,
+                        component = self._build_command_filter_component(
+                            event_filter,
+                            handler.desc,
                         )
-                    elif isinstance(filter, RegexFilter):
-                        info["type"] = "正则匹配"
-                        info["cmd"] = filter.regex_str
-                    elif isinstance(filter, PermissionTypeFilter):
+                    elif isinstance(event_filter, CommandGroupFilter):
+                        component_type = "command"
+                        info["display_type"] = "指令组"
+                        info["cmd"] = event_filter.get_complete_command_names()[0]
+                        info["cmd"] = info["cmd"].strip()
+                        component = self._build_command_group_component(
+                            event_filter,
+                            handler.desc,
+                        )
+                    elif isinstance(event_filter, RegexFilter):
+                        component_type = "command"
+                        info["display_type"] = "正则匹配"
+                        info["cmd"] = event_filter.regex_str
+                        component = {
+                            "type": "command",
+                            "name": event_filter.regex_str,
+                            "description": handler.desc or "无描述",
+                            "match": "regex",
+                        }
+                    elif isinstance(event_filter, PermissionTypeFilter):
                         has_admin = True
                 info["has_admin"] = has_admin
                 if "cmd" not in info:
                     info["cmd"] = "未知"
-                if "type" not in info:
-                    info["type"] = "事件监听器"
+                if "display_type" not in info:
+                    info["display_type"] = "事件监听器"
+                    component_type = "listener"
             else:
                 info["cmd"] = "自动触发"
-                info["type"] = "无"
+                info["display_type"] = "无"
+                if handler.event_type == EventType.OnCallingFuncToolEvent:
+                    component_type = "llm_tool"
 
-            if not info["desc"]:
-                info["desc"] = "无描述"
+            if component is None:
+                component = {
+                    "type": component_type,
+                    "name": handler.handler_name or handler.event_type.name,
+                    "description": handler.desc or "无描述",
+                }
+            else:
+                component["type"] = component_type
 
-            handlers.append(info)
+            if component_type == "command":
+                component["event_type"] = info["event_type"]
+                component["event_type_h"] = info["event_type_h"]
+                component["handler_name"] = info["handler_name"]
+                component["has_admin"] = info.get("has_admin", False)
+                if "display_type" in info:
+                    component["display_type"] = info["display_type"]
+                if "cmd" in info:
+                    component["command"] = info["cmd"]
+            else:
+                component.update(info)
+            components.append(component)
 
-        return handlers
+        return self._merge_command_components(components)
+
+    def get_plugin_skill_components(self, plugin):
+        """Build skill components provided by this plugin."""
+        plugin_names = {
+            str(name)
+            for name in (plugin.root_dir_name, plugin.name)
+            if str(name or "").strip()
+        }
+        if not plugin_names:
+            return []
+
+        try:
+            skills = SkillManager().list_skills(
+                active_only=False,
+                runtime="local",
+                show_sandbox_path=False,
+            )
+        except Exception as exc:
+            logger.warning(f"获取插件 Skills 失败 {plugin.name}: {exc!s}")
+            return []
+
+        components = []
+        for skill in skills:
+            if skill.source_type != "plugin" or skill.plugin_name not in plugin_names:
+                continue
+            components.append(
+                {
+                    "type": "skill",
+                    "name": skill.name,
+                    "description": skill.description or "无描述",
+                    "path": skill.path,
+                }
+            )
+        return components
+
+    def _get_command_filter_display_name(self, command_filter: CommandFilter) -> str:
+        return command_filter.get_complete_command_names()[0].strip()
+
+    def _get_command_description(
+        self,
+        command_filter: CommandFilter | CommandGroupFilter,
+        fallback: str = "",
+    ) -> str:
+        handler_md = getattr(command_filter, "handler_md", None)
+        desc = getattr(handler_md, "desc", "") if handler_md else ""
+        return desc or fallback or "无描述"
+
+    def _build_command_filter_component(
+        self,
+        command_filter: CommandFilter,
+        fallback_desc: str = "",
+    ) -> dict:
+        parts = self._get_command_filter_display_name(command_filter).split()
+        if not parts:
+            parts = [command_filter.command_name]
+        component = {
+            "type": "command",
+            "name": parts[-1],
+            "description": self._get_command_description(
+                command_filter,
+                fallback_desc,
+            ),
+        }
+        return self._wrap_command_component(parts[:-1], component)
+
+    def _build_command_group_component(
+        self,
+        command_group_filter: CommandGroupFilter,
+        fallback_desc: str = "",
+    ) -> dict:
+        parts = command_group_filter.get_complete_command_names()[0].strip().split()
+        if not parts:
+            parts = [command_group_filter.group_name]
+        subcommands = [
+            self._build_command_group_child(sub_filter)
+            for sub_filter in command_group_filter.sub_command_filters
+        ]
+        component = {
+            "type": "command",
+            "name": parts[-1],
+            "description": self._get_command_description(
+                command_group_filter,
+                fallback_desc,
+            ),
+        }
+        if subcommands:
+            component["subcommands"] = subcommands
+        return self._wrap_command_component(parts[:-1], component)
+
+    def _build_command_group_child(
+        self,
+        command_filter: CommandFilter | CommandGroupFilter,
+    ) -> dict:
+        if isinstance(command_filter, CommandGroupFilter):
+            component = {
+                "name": command_filter.group_name,
+                "description": self._get_command_description(command_filter),
+            }
+            subcommands = [
+                self._build_command_group_child(sub_filter)
+                for sub_filter in command_filter.sub_command_filters
+            ]
+            if subcommands:
+                component["subcommands"] = subcommands
+            return component
+
+        return {
+            "name": command_filter.command_name,
+            "description": self._get_command_description(command_filter),
+        }
+
+    def _wrap_command_component(self, parent_names: list[str], component: dict) -> dict:
+        for parent_name in reversed(parent_names):
+            component = {
+                "type": "command",
+                "name": parent_name,
+                "description": "无描述",
+                "subcommands": [component],
+            }
+        return component
+
+    def _merge_command_components(self, components: list[dict]) -> list[dict]:
+        merged: list[dict] = []
+        for component in components:
+            if component.get("type") != "command":
+                merged.append(component)
+                continue
+            existing = next(
+                (
+                    item
+                    for item in merged
+                    if item.get("type") == "command"
+                    and item.get("name") == component.get("name")
+                    and item.get("match") == component.get("match")
+                ),
+                None,
+            )
+            if existing is None:
+                merged.append(component)
+                continue
+            self._merge_command_component(existing, component)
+        return merged
+
+    def _merge_command_component(self, target: dict, source: dict) -> None:
+        if target.get("description") == "无描述" and source.get("description"):
+            target["description"] = source["description"]
+        for key, value in source.items():
+            if key in {"subcommands", "description"}:
+                continue
+            target.setdefault(key, value)
+
+        source_subcommands = source.get("subcommands")
+        if not isinstance(source_subcommands, list):
+            return
+        target_subcommands = target.setdefault("subcommands", [])
+        for source_subcommand in source_subcommands:
+            if not isinstance(source_subcommand, dict):
+                continue
+            existing = next(
+                (
+                    item
+                    for item in target_subcommands
+                    if isinstance(item, dict)
+                    and item.get("name") == source_subcommand.get("name")
+                ),
+                None,
+            )
+            if existing is None:
+                target_subcommands.append(source_subcommand)
+                continue
+            self._merge_command_component(existing, source_subcommand)
 
     async def install_plugin(self):
         if DEMO_MODE:
@@ -1103,6 +1384,7 @@ class PluginRoute(Route):
 
         post_data = await request.get_json()
         repo_url = post_data["url"]
+        download_url = str(post_data.get("download_url") or "").strip()
         ignore_version_check = bool(post_data.get("ignore_version_check", False))
 
         proxy: str = post_data.get("proxy", None)
@@ -1115,8 +1397,10 @@ class PluginRoute(Route):
                 repo_url,
                 proxy,
                 ignore_version_check=ignore_version_check,
+                download_url=download_url,
             )
             # self.core_lifecycle.restart()
+            await self._sync_skills_after_plugin_change()
             logger.info(f"安装插件 {repo_url} 成功。")
             return Response().ok(plugin_info, "安装成功。").__dict__
         except PluginVersionIncompatibleError as e:
@@ -1158,6 +1442,7 @@ class PluginRoute(Route):
                 ignore_version_check=ignore_version_check,
             )
             # self.core_lifecycle.restart()
+            await self._sync_skills_after_plugin_change()
             logger.info(f"安装插件 {file.filename} 成功")
             return Response().ok(plugin_info, "安装成功。").__dict__
         except PluginVersionIncompatibleError as e:
@@ -1192,6 +1477,7 @@ class PluginRoute(Route):
                 delete_config=delete_config,
                 delete_data=delete_data,
             )
+            await self._sync_skills_after_plugin_change()
             logger.info(f"卸载插件 {plugin_name} 成功")
             return Response().ok(None, "卸载成功").__dict__
         except Exception as e:
@@ -1220,6 +1506,7 @@ class PluginRoute(Route):
                 delete_config=delete_config,
                 delete_data=delete_data,
             )
+            await self._sync_skills_after_plugin_change()
             logger.info(f"卸载失败插件 {dir_name} 成功")
             return Response().ok(None, "卸载成功").__dict__
         except Exception as e:
@@ -1242,6 +1529,7 @@ class PluginRoute(Route):
             await self.plugin_manager.update_plugin(plugin_name, proxy)
             # self.core_lifecycle.restart()
             await self.plugin_manager.reload(plugin_name)
+            await self._sync_skills_after_plugin_change()
             logger.info(f"更新插件 {plugin_name} 成功。")
             return Response().ok(None, "更新成功。").__dict__
         except Exception as e:
@@ -1293,6 +1581,8 @@ class PluginRoute(Route):
                 results.append(result)
 
         failed = [r for r in results if r["status"] == "error"]
+        if len(failed) < len(results):
+            await self._sync_skills_after_plugin_change()
         message = (
             "批量更新完成，全部成功。"
             if not failed
@@ -1313,6 +1603,7 @@ class PluginRoute(Route):
         plugin_name = post_data["name"]
         try:
             await self.plugin_manager.turn_off_plugin(plugin_name)
+            await self._sync_skills_after_plugin_change()
             logger.info(f"停用插件 {plugin_name} 。")
             return Response().ok(None, "停用成功。").__dict__
         except Exception as e:
@@ -1331,6 +1622,7 @@ class PluginRoute(Route):
         plugin_name = post_data["name"]
         try:
             await self.plugin_manager.turn_on_plugin(plugin_name)
+            await self._sync_skills_after_plugin_change()
             logger.info(f"启用插件 {plugin_name} 。")
             return Response().ok(None, "启用成功。").__dict__
         except Exception as e:
@@ -1339,7 +1631,6 @@ class PluginRoute(Route):
 
     async def get_plugin_readme(self):
         plugin_name = request.args.get("name")
-        logger.debug(f"正在获取插件 {plugin_name} 的README文件内容")
 
         if not plugin_name:
             logger.warning("插件名称为空")
