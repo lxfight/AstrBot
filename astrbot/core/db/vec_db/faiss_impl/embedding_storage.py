@@ -1,3 +1,4 @@
+import asyncio
 import os
 
 import numpy as np
@@ -85,12 +86,28 @@ class EmbeddingStorage:
         await self.save_index()
 
     async def save_index(self) -> None:
-        """保存索引
+        """原子性保存索引到磁盘
 
-        Args:
-            path (str): 保存索引的路径
-
+        使用临时文件 + os.replace() 确保原子性，防止进程崩溃导致索引损坏。
         """
         if self.index is None:
             return
-        self._faiss.write_index(self.index, self.path)
+        if not self.path:
+            return
+
+        # 原子性保存：先写临时文件，成功后再替换
+        temp_path = f"{self.path}.tmp.{os.getpid()}"
+        try:
+            await asyncio.to_thread(self._faiss.write_index, self.index, temp_path)
+            # 使用 os.replace 确保原子性（POSIX 保证）
+            await asyncio.to_thread(os.replace, temp_path, self.path)
+        except Exception as exc:
+            # 清理临时文件
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
+            raise RuntimeError(
+                f"保存 FAISS 索引失败: {exc}。索引未更新，保持原有状态。"
+            ) from exc
