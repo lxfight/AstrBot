@@ -338,11 +338,11 @@ const displayedDocumentTotal = computed(() => {
 
 // 表格列
 const headers = [
-  { title: t('documents.name'), key: 'doc_name', sortable: true },
-  { title: t('documents.type'), key: 'file_type', sortable: true },
-  { title: t('documents.size'), key: 'file_size', sortable: true },
-  { title: t('documents.chunks'), key: 'chunk_count', sortable: true },
-  { title: t('documents.createdAt'), key: 'created_at', sortable: true },
+  { title: t('documents.name'), key: 'doc_name', sortable: false },
+  { title: t('documents.type'), key: 'file_type', sortable: false },
+  { title: t('documents.size'), key: 'file_size', sortable: false },
+  { title: t('documents.chunks'), key: 'chunk_count', sortable: false },
+  { title: t('documents.createdAt'), key: 'created_at', sortable: false },
   { title: t('documents.actions'), key: 'actions', sortable: false, align: 'end' as const }
 ]
 
