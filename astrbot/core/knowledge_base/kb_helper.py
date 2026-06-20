@@ -133,6 +133,7 @@ class KBHelper:
         self.kb_root_dir = kb_root_dir
         self.chunker = chunker
         self.init_error = None
+        self._write_lock = asyncio.Lock()
 
         self.kb_dir = Path(self.kb_root_dir) / self.kb.kb_id
         self.kb_medias_dir = Path(self.kb_dir) / "medias" / self.kb.kb_id
@@ -238,6 +239,50 @@ class KBHelper:
                 - current: 当前进度
                 - total: 总数
 
+        """
+        async with self._write_lock:
+            return await self._upload_document_locked(
+                file_name=file_name,
+                file_content=file_content,
+                file_type=file_type,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+                batch_size=batch_size,
+                tasks_limit=tasks_limit,
+                max_retries=max_retries,
+                progress_callback=progress_callback,
+                pre_chunked_text=pre_chunked_text,
+            )
+
+    async def _upload_document_locked(
+        self,
+        file_name: str,
+        file_content: bytes | None,
+        file_type: str,
+        chunk_size: int,
+        chunk_overlap: int,
+        batch_size: int,
+        tasks_limit: int,
+        max_retries: int,
+        progress_callback=None,
+        pre_chunked_text: list[str] | None = None,
+    ) -> KBDocument:
+        """Upload a document while the per-KB write lock is held.
+
+        Args:
+            file_name: Original document file name.
+            file_content: Raw file bytes, or None when using pre-chunked text.
+            file_type: Document file extension or synthetic type.
+            chunk_size: Maximum chunk size for text splitting.
+            chunk_overlap: Overlap between adjacent chunks.
+            batch_size: Embedding batch size.
+            tasks_limit: Maximum embedding concurrency.
+            max_retries: Maximum embedding retry count.
+            progress_callback: Optional async progress callback.
+            pre_chunked_text: Optional chunks supplied by import workflows.
+
+        Returns:
+            The persisted knowledge base document.
         """
         await self._ensure_vec_db()
         doc_id = str(uuid.uuid4())
@@ -481,26 +526,28 @@ class KBHelper:
 
     async def delete_document(self, doc_id: str) -> None:
         """删除单个文档及其相关数据"""
-        await self.kb_db.delete_document_by_id(
-            doc_id=doc_id,
-            vec_db=self.vec_db,  # type: ignore
-        )
-        await self.kb_db.update_kb_stats(
-            kb_id=self.kb.kb_id,
-            vec_db=self.vec_db,  # type: ignore
-        )
-        await self.refresh_kb()
+        async with self._write_lock:
+            await self.kb_db.delete_document_by_id(
+                doc_id=doc_id,
+                vec_db=self.vec_db,  # type: ignore
+            )
+            await self.kb_db.update_kb_stats(
+                kb_id=self.kb.kb_id,
+                vec_db=self.vec_db,  # type: ignore
+            )
+            await self.refresh_kb()
 
     async def delete_chunk(self, chunk_id: str, doc_id: str) -> None:
         """删除单个文本块及其相关数据"""
-        vec_db: FaissVecDB = self.vec_db  # type: ignore
-        await vec_db.delete(chunk_id)
-        await self.kb_db.update_kb_stats(
-            kb_id=self.kb.kb_id,
-            vec_db=self.vec_db,  # type: ignore
-        )
-        await self.refresh_kb()
-        await self.refresh_document(doc_id)
+        async with self._write_lock:
+            vec_db: FaissVecDB = self.vec_db  # type: ignore
+            await vec_db.delete(chunk_id)
+            await self.kb_db.update_kb_stats(
+                kb_id=self.kb.kb_id,
+                vec_db=self.vec_db,  # type: ignore
+            )
+            await self.refresh_kb()
+            await self.refresh_document(doc_id)
 
     async def refresh_kb(self) -> None:
         if self.kb:
