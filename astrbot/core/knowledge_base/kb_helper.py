@@ -40,18 +40,20 @@ class RateLimiter:
         self.max_per_minute = max_rpm
         self.interval = 60.0 / max_rpm if max_rpm > 0 else 0
         self.last_call_time = 0
+        self._lock = asyncio.Lock()
 
     async def __aenter__(self):
         if self.interval == 0:
             return
 
-        now = time.monotonic()
-        elapsed = now - self.last_call_time
+        async with self._lock:
+            now = time.monotonic()
+            elapsed = now - self.last_call_time
 
-        if elapsed < self.interval:
-            await asyncio.sleep(self.interval - elapsed)
+            if elapsed < self.interval:
+                await asyncio.sleep(self.interval - elapsed)
 
-        self.last_call_time = time.monotonic()
+            self.last_call_time = time.monotonic()
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         pass
