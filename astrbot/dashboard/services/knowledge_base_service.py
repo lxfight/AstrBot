@@ -437,6 +437,7 @@ class KnowledgeBaseService:
         kb_id: str | None,
         page: int,
         page_size: int,
+        search: str | None = None,
     ) -> dict[str, Any]:
         if not kb_id:
             raise KnowledgeBaseServiceError("缺少参数 kb_id")
@@ -445,11 +446,17 @@ class KnowledgeBaseService:
             raise KnowledgeBaseServiceError("知识库不存在")
 
         offset = (page - 1) * page_size
-        doc_list = await kb_helper.list_documents(offset=offset, limit=page_size)
+        search = search.strip() if search else None
+        doc_list = await kb_helper.list_documents(
+            offset=offset,
+            limit=page_size,
+            search=search,
+        )
         return {
             "items": [doc.model_dump() for doc in doc_list],
             "page": page,
             "page_size": page_size,
+            "total": await kb_helper.count_documents(search=search),
         }
 
     async def list_documents_from_dashboard_query(
@@ -458,11 +465,13 @@ class KnowledgeBaseService:
         kb_id: str | None,
         page,
         page_size,
+        search: str | None = None,
     ) -> dict[str, Any]:
         return await self.list_documents(
             kb_id=kb_id,
             page=self._to_int(page, 1),
             page_size=self._to_int(page_size, 100),
+            search=search,
         )
 
     async def upload_document(

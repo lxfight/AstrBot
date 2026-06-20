@@ -264,9 +264,30 @@ export type KnowledgeBaseRequest = {
     metadata?: DynamicConfig;
 };
 
+export type KnowledgeDocument = {
+    doc_id?: string;
+    kb_id?: string;
+    doc_name?: string;
+    file_type?: string;
+    file_size?: number;
+    file_path?: string;
+    chunk_count?: number;
+    media_count?: number;
+    created_at?: string;
+    updated_at?: string;
+    [key: string]: unknown | string | number;
+};
+
 export type KnowledgeDocumentImportRequest = {
     paths: Array<(string)>;
     parser?: string;
+};
+
+export type KnowledgeDocumentListResponse = {
+    items: Array<KnowledgeDocument>;
+    page: number;
+    page_size: number;
+    total: number;
 };
 
 export type KnowledgeDocumentUploadRequest = {
@@ -2624,10 +2645,13 @@ export type ListKnowledgeDocumentsData = {
     query?: {
         page?: number;
         page_size?: number;
+        search?: string;
     };
 };
 
-export type ListKnowledgeDocumentsResponse = (SuccessEnvelope);
+export type ListKnowledgeDocumentsResponse = ((SuccessEnvelope & {
+    data?: KnowledgeDocumentListResponse;
+}));
 
 export type ListKnowledgeDocumentsError = unknown;
 

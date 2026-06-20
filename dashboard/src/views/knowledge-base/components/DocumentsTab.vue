@@ -11,7 +11,9 @@
 
     <!-- 文档列表 -->
     <v-card variant="outlined">
-      <v-data-table :headers="headers" :items="documents" :loading="loading" :search="searchQuery" :items-per-page="10">
+      <v-data-table-server :headers="headers" :items="documents" :loading="loading"
+        :items-length="displayedDocumentTotal" v-model:page="currentPage" v-model:items-per-page="itemsPerPage"
+        @update:options="handleTableOptions">
         <template #item.doc_name="{ item }">
           <div class="d-flex align-center gap-2">
             <v-icon :color="getFileColor(item.file_type)" class="mr-2">
@@ -53,7 +55,7 @@
             <p class="mt-4 text-medium-emphasis">{{ t('documents.empty') }}</p>
           </div>
         </template>
-      </v-data-table>
+      </v-data-table-server>
     </v-card>
 
     <!-- 上传对话框 -->
@@ -236,7 +238,7 @@
 
 <script setup lang="ts">
 import TavilyKeyDialog from './TavilyKeyDialog.vue'
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { configProfileApi, knowledgeApi, providerApi } from '@/api/v1'
 import { useModuleI18n } from '@/i18n/composables'
@@ -256,6 +258,9 @@ const loading = ref(false)
 const uploading = ref(false)
 const deleting = ref(false)
 const documents = ref<any[]>([])
+const totalDocuments = ref(0)
+const currentPage = ref(1)
+const itemsPerPage = ref(10)
 const searchQuery = ref('')
 const showUploadDialog = ref(false)
 const showDeleteDialog = ref(false)
@@ -326,6 +331,11 @@ const isUploadDisabled = computed(() => {
   return true
 })
 
+const displayedDocumentTotal = computed(() => {
+  const uploadingCount = documents.value.filter(doc => doc.uploading).length
+  return totalDocuments.value + uploadingCount
+})
+
 // 表格列
 const headers = [
   { title: t('documents.name'), key: 'doc_name', sortable: true },
@@ -340,9 +350,14 @@ const headers = [
 const loadDocuments = async () => {
   loading.value = true
   try {
-    const response = await knowledgeApi.documents(props.kbId)
+    const response = await knowledgeApi.documents(props.kbId, {
+      page: currentPage.value,
+      page_size: itemsPerPage.value,
+      search: searchQuery.value.trim() || undefined
+    })
     if (response.data.status === 'ok') {
       documents.value = response.data.data.items || []
+      totalDocuments.value = response.data.data.total || documents.value.length
     }
   } catch (error) {
     console.error('Failed to load documents:', error)
@@ -351,6 +366,23 @@ const loadDocuments = async () => {
     loading.value = false
   }
 }
+
+const handleTableOptions = async (options: { page: number; itemsPerPage: number }) => {
+  currentPage.value = options.page
+  itemsPerPage.value = options.itemsPerPage
+  await loadDocuments()
+}
+
+let searchTimer: number | null = null
+watch(searchQuery, () => {
+  if (searchTimer !== null) {
+    window.clearTimeout(searchTimer)
+  }
+  searchTimer = window.setTimeout(() => {
+    currentPage.value = 1
+    loadDocuments()
+  }, 300)
+})
 
 // 文件选择
 const handleFileSelect = (event: Event) => {
@@ -790,6 +822,9 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopProgressPolling()
+  if (searchTimer !== null) {
+    window.clearTimeout(searchTimer)
+  }
 })
 </script>
 

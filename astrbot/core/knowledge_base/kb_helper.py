@@ -469,10 +469,27 @@ class KBHelper:
         self,
         offset: int = 0,
         limit: int = 100,
+        search: str | None = None,
     ) -> list[KBDocument]:
         """列出知识库的所有文档"""
-        docs = await self.kb_db.list_documents_by_kb(self.kb.kb_id, offset, limit)
+        docs = await self.kb_db.list_documents_by_kb(
+            self.kb.kb_id,
+            offset,
+            limit,
+            search=search,
+        )
         return docs
+
+    async def count_documents(self, search: str | None = None) -> int:
+        """Count documents in this knowledge base.
+
+        Args:
+            search: Optional document name or file type filter.
+
+        Returns:
+            Number of documents recorded for the knowledge base.
+        """
+        return await self.kb_db.count_documents_by_kb(self.kb.kb_id, search=search)
 
     async def get_document(self, doc_id: str) -> KBDocument | None:
         """获取单个文档"""

@@ -3412,9 +3412,22 @@ paths:
         - $ref: "#/components/parameters/KbId"
         - $ref: "#/components/parameters/Page"
         - $ref: "#/components/parameters/PageSize"
+        - name: search
+          in: query
+          schema:
+            type: string
       responses:
         "200":
-          $ref: "#/components/responses/Ok"
+          description: Knowledge base documents
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/KnowledgeDocumentListResponse"
     post:
       tags: [Knowledge Base]
       summary: Upload a document to a knowledge base
@@ -5648,6 +5661,49 @@ components:
           format: binary
         parser:
           type: string
+
+    KnowledgeDocument:
+      type: object
+      properties:
+        doc_id:
+          type: string
+        kb_id:
+          type: string
+        doc_name:
+          type: string
+        file_type:
+          type: string
+        file_size:
+          type: integer
+        file_path:
+          type: string
+        chunk_count:
+          type: integer
+        media_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      additionalProperties: true
+
+    KnowledgeDocumentListResponse:
+      type: object
+      required: [items, page, page_size, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/KnowledgeDocument"
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total:
+          type: integer
+      additionalProperties: false
 
     KnowledgeDocumentImportRequest:
       type: object
