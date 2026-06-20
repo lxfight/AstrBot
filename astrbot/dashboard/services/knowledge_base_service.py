@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import traceback
 import uuid
 from pathlib import Path
@@ -14,6 +15,9 @@ from astrbot.core.provider.provider import EmbeddingProvider, RerankProvider
 from astrbot.core.utils.astrbot_path import get_astrbot_temp_path
 from astrbot.dashboard.utils import generate_tsne_visualization
 
+TASK_RESULT_TTL_SECONDS = 3600
+MAX_TASK_RESULTS = 200
+
 
 class KnowledgeBaseServiceError(Exception):
     pass
@@ -25,6 +29,37 @@ class KnowledgeBaseService:
         self.upload_progress: dict[str, dict[str, Any]] = {}
         self.upload_tasks: dict[str, dict[str, Any]] = {}
 
+    def cleanup_finished_tasks(self) -> None:
+        now = time.monotonic()
+        finished_task_ids = [
+            task_id
+            for task_id, task in self.upload_tasks.items()
+            if task.get("status") in {"completed", "failed"}
+            and now - task.get("finished_at", now) > TASK_RESULT_TTL_SECONDS
+        ]
+
+        remaining_finished = [
+            (
+                task.get("finished_at", now),
+                task_id,
+            )
+            for task_id, task in self.upload_tasks.items()
+            if task.get("status") in {"completed", "failed"}
+            and task_id not in finished_task_ids
+        ]
+        if len(remaining_finished) > MAX_TASK_RESULTS:
+            remaining_finished.sort()
+            finished_task_ids.extend(
+                task_id
+                for _, task_id in remaining_finished[
+                    : len(remaining_finished) - MAX_TASK_RESULTS
+                ]
+            )
+
+        for task_id in finished_task_ids:
+            self.upload_tasks.pop(task_id, None)
+            self.upload_progress.pop(task_id, None)
+
     @staticmethod
     def _payload(data: object) -> dict[str, Any]:
         return data if isinstance(data, dict) else {}
@@ -33,10 +68,12 @@ class KnowledgeBaseService:
         return self.core_lifecycle.kb_manager
 
     def init_task(self, task_id: str, status: str = "pending") -> None:
+        self.cleanup_finished_tasks()
         self.upload_tasks[task_id] = {
             "status": status,
             "result": None,
             "error": None,
+            "created_at": time.monotonic(),
         }
 
     def set_task_result(
@@ -46,10 +83,16 @@ class KnowledgeBaseService:
         result: Any = None,
         error: str | None = None,
     ) -> None:
+        self.cleanup_finished_tasks()
         self.upload_tasks[task_id] = {
             "status": status,
             "result": result,
             "error": error,
+            "created_at": self.upload_tasks.get(task_id, {}).get(
+                "created_at",
+                time.monotonic(),
+            ),
+            "finished_at": time.monotonic(),
         }
         if task_id in self.upload_progress:
             self.upload_progress[task_id]["status"] = status
@@ -605,6 +648,7 @@ class KnowledgeBaseService:
         }
 
     def get_upload_progress(self, task_id: str | None) -> dict[str, Any]:
+        self.cleanup_finished_tasks()
         if not task_id:
             raise KnowledgeBaseServiceError("缺少参数 task_id")
         if task_id not in self.upload_tasks:
