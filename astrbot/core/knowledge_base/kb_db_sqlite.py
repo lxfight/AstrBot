@@ -311,6 +311,19 @@ class KBSQLiteDatabase:
         # 在 vec db 中删除相关向量
         await vec_db.delete_documents(metadata_filters={"kb_doc_id": doc_id})
 
+    async def delete_document_record_by_id(self, doc_id: str) -> None:
+        """Delete document metadata rows without touching vector storage.
+
+        Args:
+            doc_id: Knowledge base document ID to remove.
+        """
+        async with self.get_db() as session, session.begin():
+            await session.execute(delete(KBMedia).where(col(KBMedia.doc_id) == doc_id))
+            await session.execute(
+                delete(KBDocument).where(col(KBDocument.doc_id) == doc_id)
+            )
+            await session.commit()
+
     # ===== 多媒体查询 =====
 
     async def list_media_by_doc(self, doc_id: str) -> list[KBMedia]:

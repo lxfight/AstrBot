@@ -434,9 +434,9 @@ class KBHelper:
 
             vec_db: FaissVecDB = self.vec_db  # type: ignore
             try:
+                await self.refresh_document(doc_id)
                 await self.kb_db.update_kb_stats(kb_id=self.kb.kb_id, vec_db=vec_db)
                 await self.refresh_kb()
-                await self.refresh_document(doc_id)
             except KnowledgeBaseUploadError:
                 raise
             except Exception as exc:
@@ -455,6 +455,31 @@ class KBHelper:
                 logger.error(f"上传文档失败: {e}", exc_info=True)
             # if file_path.exists():
             #     file_path.unlink()
+            try:
+                await self.vec_db.delete_documents(
+                    metadata_filters={"kb_doc_id": doc_id}
+                )
+            except Exception as cleanup_exc:
+                logger.warning(
+                    f"清理失败文档的文本块失败 {doc_id}: {cleanup_exc}",
+                    exc_info=True,
+                )
+            try:
+                await self.kb_db.delete_document_record_by_id(doc_id)
+            except Exception as cleanup_exc:
+                logger.warning(
+                    f"清理失败文档的元数据失败 {doc_id}: {cleanup_exc}",
+                    exc_info=True,
+                )
+            try:
+                vec_db: FaissVecDB = self.vec_db  # type: ignore
+                await self.kb_db.update_kb_stats(kb_id=self.kb.kb_id, vec_db=vec_db)
+                await self.refresh_kb()
+            except Exception as cleanup_exc:
+                logger.warning(
+                    f"刷新失败文档清理后的知识库统计失败 {doc_id}: {cleanup_exc}",
+                    exc_info=True,
+                )
 
             for media_path in media_paths:
                 try:
