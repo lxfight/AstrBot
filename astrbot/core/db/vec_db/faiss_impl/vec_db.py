@@ -135,26 +135,6 @@ class FaissVecDB(BaseVecDB):
                 },
             )
 
-        # 使用 DocumentStorage 的批量插入方法
-        int_ids = await self.document_storage.insert_documents_batch(
-            ids,
-            contents,
-            metadatas,
-        )
-        if len(int_ids) != content_count:
-            raise KnowledgeBaseUploadError(
-                stage="storage",
-                user_message=(
-                    f"存储失败：写入文档索引后返回的内部 ID 数量与文本分块数量不一致"
-                    f"（期望 {content_count}，实际 {len(int_ids)}）。"
-                ),
-                details={
-                    "expected_contents": content_count,
-                    "actual_int_ids": len(int_ids),
-                },
-            )
-
-        # 批量插入向量到 FAISS
         try:
             vectors_array = np.asarray(vectors, dtype=np.float32)
         except (TypeError, ValueError) as exc:
@@ -187,7 +167,49 @@ class FaissVecDB(BaseVecDB):
                     "actual_dimension": int(vectors_array.shape[1]),
                 },
             )
-        await self.embedding_storage.insert_batch(vectors_array, int_ids)
+
+        # 使用 DocumentStorage 的批量插入方法
+        int_ids = await self.document_storage.insert_documents_batch(
+            ids,
+            contents,
+            metadatas,
+        )
+        if len(int_ids) != content_count:
+            for doc_id in ids:
+                try:
+                    await self.document_storage.delete_document_by_doc_id(doc_id)
+                except Exception as cleanup_exc:
+                    logger.warning(
+                        f"Failed to rollback document row {doc_id}: {cleanup_exc}"
+                    )
+            raise KnowledgeBaseUploadError(
+                stage="storage",
+                user_message=(
+                    f"存储失败：写入文档索引后返回的内部 ID 数量与文本分块数量不一致"
+                    f"（期望 {content_count}，实际 {len(int_ids)}）。"
+                ),
+                details={
+                    "expected_contents": content_count,
+                    "actual_int_ids": len(int_ids),
+                },
+            )
+
+        # 批量插入向量到 FAISS
+        try:
+            await self.embedding_storage.insert_batch(vectors_array, int_ids)
+        except Exception:
+            try:
+                await self.embedding_storage.delete(int_ids)
+            except Exception as cleanup_exc:
+                logger.warning(f"Failed to rollback inserted vectors: {cleanup_exc}")
+            for doc_id in ids:
+                try:
+                    await self.document_storage.delete_document_by_doc_id(doc_id)
+                except Exception as cleanup_exc:
+                    logger.warning(
+                        f"Failed to rollback document row {doc_id}: {cleanup_exc}"
+                    )
+            raise
         return int_ids
 
     async def retrieve(
