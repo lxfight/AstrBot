@@ -32,6 +32,7 @@ import {
   type DynamicConfig,
   type EnabledPatch,
   type GhproxyTestRequest,
+  type KnowledgeDocumentUrlImportRequest,
   type LoginRequest,
   type ListConversationsData,
   type McpServerConfig,
@@ -1386,11 +1387,11 @@ export const knowledgeApi = {
       }),
     );
   },
-  importDocumentFromUrl(kbId: string, payload: OpenConfig) {
+  importDocumentFromUrl(kbId: string, payload: KnowledgeDocumentUrlImportRequest) {
     return typed<any>(
       openApiV1.importKnowledgeDocumentFromUrl({
         path: { kb_id: kbId },
-        body: payload as any,
+        body: payload,
       }),
     );
   },

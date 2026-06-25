@@ -5651,14 +5651,27 @@ components:
 
     KnowledgeDocumentImportRequest:
       type: object
-      required: [paths]
+      required: [documents]
       properties:
-        paths:
+        documents:
           type: array
           items:
-            type: string
-        parser:
-          type: string
+            type: object
+            required: [file_name, chunks]
+            properties:
+              file_name:
+                type: string
+              chunks:
+                type: array
+                items:
+                  type: string
+            additionalProperties: true
+        batch_size:
+          type: integer
+        tasks_limit:
+          type: integer
+        max_retries:
+          type: integer
       additionalProperties: false
 
     KnowledgeDocumentUrlImportRequest:
@@ -5668,8 +5681,20 @@ components:
         url:
           type: string
           format: uri
-        parser:
-          type: string
+        chunk_size:
+          type: integer
+        chunk_overlap:
+          type: integer
+        batch_size:
+          type: integer
+        tasks_limit:
+          type: integer
+        max_retries:
+          type: integer
+        enable_cleaning:
+          type: boolean
+        cleaning_provider_id:
+          type: [string, "null"]
       additionalProperties: false
 
     KnowledgeRetrieveRequest:

@@ -265,8 +265,14 @@ export type KnowledgeBaseRequest = {
 };
 
 export type KnowledgeDocumentImportRequest = {
-    paths: Array<(string)>;
-    parser?: string;
+    documents: Array<{
+        file_name: string;
+        chunks: Array<(string)>;
+        [key: string]: unknown | string;
+    }>;
+    batch_size?: number;
+    tasks_limit?: number;
+    max_retries?: number;
 };
 
 export type KnowledgeDocumentUploadRequest = {
@@ -276,7 +282,13 @@ export type KnowledgeDocumentUploadRequest = {
 
 export type KnowledgeDocumentUrlImportRequest = {
     url: string;
-    parser?: string;
+    chunk_size?: number;
+    chunk_overlap?: number;
+    batch_size?: number;
+    tasks_limit?: number;
+    max_retries?: number;
+    enable_cleaning?: boolean;
+    cleaning_provider_id?: (string) | null;
 };
 
 export type KnowledgeRetrieveRequest = {

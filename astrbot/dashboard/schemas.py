@@ -220,15 +220,39 @@ class KnowledgeBaseImportRequest(OpenModel):
     tasks_limit: int | None = None
     max_retries: int | None = None
 
+    def canonical_payload(self) -> dict[str, Any]:
+        """Return the service-facing document import payload."""
+        return self.model_dump(
+            exclude_none=True,
+            include={"documents", "batch_size", "tasks_limit", "max_retries"},
+        )
+
 
 class KnowledgeBaseUrlImportRequest(OpenModel):
     url: str | None = None
-    urls: list[str] | None = None
     chunk_size: int | None = None
     chunk_overlap: int | None = None
     batch_size: int | None = None
     tasks_limit: int | None = None
     max_retries: int | None = None
+    enable_cleaning: bool | None = None
+    cleaning_provider_id: str | None = None
+
+    def canonical_payload(self) -> dict[str, Any]:
+        """Return the service-facing URL import payload."""
+        return self.model_dump(
+            exclude_none=True,
+            include={
+                "url",
+                "chunk_size",
+                "chunk_overlap",
+                "batch_size",
+                "tasks_limit",
+                "max_retries",
+                "enable_cleaning",
+                "cleaning_provider_id",
+            },
+        )
 
 
 class KnowledgeBaseRetrieveRequest(OpenModel):
