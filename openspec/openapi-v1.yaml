@@ -5656,7 +5656,6 @@ components:
               type: string
             embedding_provider_id:
               type: string
-          additionalProperties: false
 
     KnowledgeDocumentUploadRequest:
       type: object
