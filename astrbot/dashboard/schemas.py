@@ -234,8 +234,23 @@ class KnowledgeBaseUrlImportRequest(OpenModel):
 class KnowledgeBaseRetrieveRequest(OpenModel):
     query: str | None = None
     top_k: int | None = None
-    threshold: float | None = None
-    rerank: bool | None = None
+    debug: bool | None = None
+
+    def canonical_payload(self, *, kb_name: str) -> dict[str, Any]:
+        """Return the service-facing retrieve payload.
+
+        Args:
+            kb_name: Knowledge base name resolved from the route path.
+
+        Returns:
+            Dictionary accepted by KnowledgeBaseService.retrieve.
+        """
+        data = self.model_dump(
+            exclude_none=True,
+            include={"query", "top_k", "debug"},
+        )
+        data["kb_names"] = [kb_name]
+        return data
 
 
 class ToolEnabledRequest(BaseModel):

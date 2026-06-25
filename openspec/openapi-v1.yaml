@@ -5681,8 +5681,8 @@ components:
         top_k:
           type: integer
           default: 5
-        score_threshold:
-          type: number
+        debug:
+          type: boolean
       additionalProperties: false
 
     PersonaRequest:

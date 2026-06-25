@@ -282,7 +282,7 @@ export type KnowledgeDocumentUrlImportRequest = {
 export type KnowledgeRetrieveRequest = {
     query: string;
     top_k?: number;
-    score_threshold?: number;
+    debug?: boolean;
 };
 
 export type LoginRequest = {

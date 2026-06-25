@@ -32,6 +32,7 @@ import {
   type DynamicConfig,
   type EnabledPatch,
   type GhproxyTestRequest,
+  type KnowledgeRetrieveRequest,
   type LoginRequest,
   type ListConversationsData,
   type McpServerConfig,
@@ -1432,11 +1433,11 @@ export const knowledgeApi = {
       }),
     );
   },
-  retrieve(kbId: string, payload: OpenConfig) {
+  retrieve(kbId: string, payload: KnowledgeRetrieveRequest) {
     return typed<any>(
       openApiV1.retrieveKnowledgeBase({
         path: { kb_id: kbId },
-        body: payload as any,
+        body: payload,
       }),
     );
   },
