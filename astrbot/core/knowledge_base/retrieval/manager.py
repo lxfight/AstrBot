@@ -201,7 +201,7 @@ class RetrievalManager:
     ):
         """稠密检索 (向量相似度)
 
-        为每个知识库使用独立的向量数据库进行检索,然后合并结果。
+        为每个知识库使用独立的向量数据库进行并行检索,然后合并结果。
 
         Args:
             query: 查询文本
@@ -212,10 +212,12 @@ class RetrievalManager:
             List[Result]: 检索结果列表
 
         """
-        all_results: list[Result] = []
-        for kb_id in kb_ids:
+        import asyncio
+
+        async def retrieve_single_kb(kb_id: str) -> list[Result]:
+            """检索单个知识库"""
             if kb_id not in kb_options:
-                continue
+                return []
             try:
                 vec_db: FaissVecDB = kb_options[kb_id]["vec_db"]
                 dense_k = int(kb_options[kb_id]["top_k_dense"])
@@ -226,18 +228,25 @@ class RetrievalManager:
                     rerank=False,  # 稠密检索阶段不进行 rerank
                     metadata_filters={"kb_id": kb_id},
                 )
-
-                all_results.extend(vec_results)
+                return vec_results
             except Exception as e:
                 logger.error(
                     f"知识库 {kb_id} 稠密检索失败: {type(e).__name__}: {e}",
                     exc_info=True,
                 )
-                # skip the faulty KB and continue
+                return []
 
-        # 按相似度排序并返回 top_k
+        # 并行检索所有知识库
+        tasks = [retrieve_single_kb(kb_id) for kb_id in kb_ids]
+        results_per_kb = await asyncio.gather(*tasks)
+
+        # 合并所有结果
+        all_results: list[Result] = []
+        for results in results_per_kb:
+            all_results.extend(results)
+
+        # 按相似度排序并返回
         all_results.sort(key=lambda x: x.similarity, reverse=True)
-        # return all_results[: len(all_results) // len(kb_ids)]
         return all_results
 
     async def _rerank(
