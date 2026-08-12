@@ -109,28 +109,29 @@ class RetrievalManager:
 
         kb_ids = new_kb_ids
 
-        # 1. 稠密检索
-        time_start = time.time()
-        dense_results = await self._dense_retrieve(
-            query=query,
-            kb_ids=kb_ids,
-            kb_options=kb_options,
-        )
-        time_end = time.time()
-        logger.debug(
-            f"Dense retrieval across {len(kb_ids)} bases took {time_end - time_start:.2f}s and returned {len(dense_results)} results.",
-        )
+        # 1. 并行执行稠密检索和稀疏检索
+        import asyncio
 
-        # 2. 稀疏检索
         time_start = time.time()
-        sparse_results = await self.sparse_retriever.retrieve(
-            query=query,
-            kb_ids=kb_ids,
-            kb_options=kb_options,
+        dense_task = asyncio.create_task(
+            self._dense_retrieve(
+                query=query,
+                kb_ids=kb_ids,
+                kb_options=kb_options,
+            )
         )
+        sparse_task = asyncio.create_task(
+            self.sparse_retriever.retrieve(
+                query=query,
+                kb_ids=kb_ids,
+                kb_options=kb_options,
+            )
+        )
+        dense_results, sparse_results = await asyncio.gather(dense_task, sparse_task)
         time_end = time.time()
         logger.debug(
-            f"Sparse retrieval across {len(kb_ids)} bases took {time_end - time_start:.2f}s and returned {len(sparse_results)} results.",
+            f"Parallel retrieval (dense + sparse) across {len(kb_ids)} bases took {time_end - time_start:.2f}s, "
+            f"returned {len(dense_results)} dense and {len(sparse_results)} sparse results.",
         )
 
         # 3. 结果融合
