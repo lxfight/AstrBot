@@ -70,27 +70,30 @@ class SparseRetriever:
             List[SparseResult]: 检索结果列表
 
         """
-        fts_results = []
-        fallback_kb_ids = []
+        import asyncio
+
         query_tokens = tokenize_text(query, self.hit_stopwords)
-        for kb_id in kb_ids:
+
+        async def retrieve_single_kb(kb_id: str) -> tuple[list[SparseResult], bool]:
+            """检索单个知识库，返回 (结果列表, 是否需要fallback)"""
             vec_db: FaissVecDB | None = kb_options.get(kb_id, {}).get("vec_db")
             if not vec_db:
-                continue
+                return [], False
+
             top_k_sparse = kb_options.get(kb_id, {}).get("top_k_sparse", 50)
             result = await vec_db.document_storage.search_sparse(
                 query_tokens=query_tokens,
                 limit=top_k_sparse,
             )
             if result is None:
-                fallback_kb_ids.append(kb_id)
-                continue
+                return [], True  # 需要 fallback
 
             # BM25 scores from independent FTS5 indexes are not comparable.
             # Preserve each index's local rank for the later RRF stage.
+            sparse_results = []
             for rank, doc in enumerate(result, start=1):
                 chunk_md = json.loads(doc["metadata"])
-                fts_results.append(
+                sparse_results.append(
                     SparseResult(
                         chunk_id=doc["doc_id"],
                         chunk_index=chunk_md["chunk_index"],
@@ -101,6 +104,20 @@ class SparseRetriever:
                         rank=rank,
                     ),
                 )
+            return sparse_results, False
+
+        # 并行检索所有知识库
+        tasks = [retrieve_single_kb(kb_id) for kb_id in kb_ids]
+        results_per_kb = await asyncio.gather(*tasks)
+
+        # 分离成功的结果和需要 fallback 的知识库
+        fts_results = []
+        fallback_kb_ids = []
+        for kb_id, (results, needs_fallback) in zip(kb_ids, results_per_kb):
+            if needs_fallback:
+                fallback_kb_ids.append(kb_id)
+            else:
+                fts_results.extend(results)
 
         fallback_results = []
         if fallback_kb_ids:
